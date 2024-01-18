@@ -1,0 +1,420 @@
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Keypad_I2C.h>
+
+#define green 2                                 	//green led pin 
+#define buzzer 4                         			//buzzer pin
+#define buttonPin 6                      			//Push Button pin
+#define relay 12                                	//relay pin
+
+String master;                     				
+String otpstring;                 				
+String security = "2000";
+
+String esecurity;								
+String eotp;                          				
+String edata;                          			 
+String substr;
+
+char customkey;
+
+SoftwareSerial mySerial(9, 10);                  	//connection to gsm tx,rx
+
+int x,f=0;
+
+const byte ROWS = 4;                            	
+const byte COLS = 4;                          		
+char keys[ROWS][COLS] =
+{
+{'1','2','3','A'},
+{'4','5','6','B'},
+{'7','8','9','C'},
+{'*','0','#','D'}
+};
+
+byte rowPins[ROWS] = {0, 1, 2, 3}; 				
+byte colPins[COLS] = {4, 5, 6, 7}; 				
+
+Keypad_I2C myKeypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS, 0x20, PCF8574);
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+void setup() 
+{
+  	Wire.begin();
+     myKeypad.begin(makeKeymap(keys));
+
+  	Serial.begin(9600);
+     mySerial.begin(9600);
+     delay(100);
+
+     lcd.init();                                 	 
+     lcd.clear();                            		
+     lcd.backlight();                        		
+
+  	newpassword();
+  	lcd.setCursor(0,0);         
+     lcd.print("New Password Set");
+  	delay(1000);
+  	lcd.clear(); 
+     lcd.setCursor(1,0);         
+     lcd.print("Lock Activated");
+     delay(1000);
+     lcd.clear();
+     lcd.noBacklight();
+  
+     pinMode(relay, OUTPUT);
+     pinMode(green, OUTPUT);
+     pinMode(buzzer, OUTPUT);
+     pinMode(buttonPin, INPUT);
+
+     digitalWrite(relay, LOW);               		//check relay trigger
+     digitalWrite(green, LOW); 
+     digitalWrite(buzzer, LOW); 
+}
+
+void loop()
+{
+    	customkey = myKeypad.getKey();
+     if(digitalRead(buttonPin))
+     {
+          digitalWrite(relay, HIGH);
+          delay(3000);
+          digitalWrite(relay, LOW);
+     }
+    	else if(customkey == 'A')
+     {
+        	lcd.backlight();
+          lcd.setCursor(1, 0);
+          lcd.print("Enter Password");
+          readpassword();
+    		if(f==1)
+    		{
+      		f=0;
+      		esecurity="";
+      		goto alpha;
+    		}
+    
+          if(checkpassword())
+          {
+              	lcd.clear();
+              	lcd.setCursor(0, 0);
+            	lcd.print("PASSWORD CORRECT");
+              	delay(1000);
+
+             	sendotp();                      			//sending otp function
+
+          	readotp();            					//read otp entered by user
+
+              	if(checkotp())
+              	{
+                  	allok();
+              	}
+              	else
+              	{
+                  	lcd.clear();
+                  	lcd.setCursor(0, 0);
+                   	lcd.print("OTP WRONG");
+                   digitalWrite(buzzer, HIGH); 
+                   gsmerror();
+                   digitalWrite(buzzer, LOW); 
+              	}
+          }
+          else
+          {
+              	lcd.clear();
+            	lcd.setCursor(0, 0);
+              	lcd.print("PASSWORD WRONG");
+              	digitalWrite(buzzer, HIGH); 
+              	gsmerror();
+              	digitalWrite(buzzer, LOW); 
+          }
+          alpha:lcd.clear();
+          lcd.noBacklight();
+          edata = "";
+          eotp = "";
+     }
+}
+
+void readpassword()
+{
+  	x=0;
+  	customkey = myKeypad.waitForKey();
+     while(customkey != '#')
+    	{
+    		if(x == 0 && customkey == '*')         
+         	{
+            	resetpassword();
+      		f=1;
+      		return;
+         	}
+    		else if(x > 0 && customkey == '*')         			//remove last entered character
+         	{
+             	x--;
+          	substr="";
+              	substr+=edata.substring(0,x);
+              	edata="";
+             	edata+=substr;        
+              	lcd.setCursor(x,1);
+              	lcd.print(" ");
+       	}
+        	else if(customkey != '*')
+         	{
+               edata = edata + customkey;           
+               lcd.setCursor(x, 1);           
+               lcd.print("*");                         
+               x++;                             
+         	}
+        	customkey = myKeypad.waitForKey();
+     }
+}
+
+void readsecurity()
+{
+  	x=0;
+  	customkey = myKeypad.waitForKey();
+     while(customkey != '#')
+     {
+    		if(x > 0 && customkey == '*')         				//remove last entered character
+         	{
+            	x--;
+          	substr="";
+              	substr+=esecurity.substring(0,x);
+              	esecurity="";
+             	esecurity+=substr;        
+              	lcd.setCursor(x,1);
+              	lcd.print(" ");
+        	}
+        	else if(customkey != '*')
+        	{
+             	esecurity = esecurity + customkey;           
+             	lcd.setCursor(x, 1);           
+              	lcd.print("*");                         
+             	x++;                             
+         	}
+        	customkey = myKeypad.waitForKey();
+  	}
+}
+
+void readotp()
+{
+  	x=0;
+  	lcd.clear();
+    	lcd.setCursor(0, 0);
+    	lcd.print("Enter OTP");
+  	customkey = myKeypad.waitForKey();
+     while(customkey != '#')
+     {
+         	if(x > 0 && customkey == '*')             			//remove last entered character
+         	{
+            	x--;
+          	substr="";
+              	substr+=eotp.substring(0,x);
+              	eotp="";
+              	eotp+=substr;         
+              	lcd.setCursor(x,1);
+             	lcd.print(" ");
+       	}
+         	else if(customkey != '*')
+        	{
+              	eotp = eotp + customkey;           
+             	lcd.setCursor(x, 1);           
+             	lcd.print("*");                         
+             	x++;                             
+         	}
+        	customkey = myKeypad.waitForKey();
+  	}
+}
+
+void resetpassword()
+{
+  	lcd.clear();
+  	lcd.setCursor(0, 0);
+    	lcd.print("RESET Mode");
+  	delay(750);
+  	lcd.setCursor(0, 0);
+    	lcd.print("Your Birth Year?");
+    	readsecurity();
+  	if(checksecurity)
+  	{
+    		sendotp();
+    		readotp();
+    		if(checkotp())
+    		{
+      		newpassword();
+      		lcd.clear();
+      		lcd.setCursor(0, 0);
+          	lcd.print("Password Changed");
+    		}
+    		else
+    		{
+      		goto beta;
+    		}
+  	}
+  	else
+  	{
+    		beta : lcd.clear();
+    		lcd.setCursor(0, 0);
+        	lcd.print("RESET Failed");
+  	}
+    	delay(1000);
+}
+
+void newpassword()
+{
+  	lcd.clear();
+  	lcd.setCursor(0, 0);
+    	lcd.print("Set New Password");
+  	master = "";
+  
+  	x=0;
+    	customkey = myKeypad.waitForKey();
+    	while(customkey != '#')
+    	{
+        	if(x > 0 && customkey == '*')             			//remove last entered character
+         	{
+			x--;
+          	eotp.setCharAt((master.length()-1), '\0');        
+              	lcd.setCursor(x,1);
+             	lcd.print(" ");
+         	}
+        	else if(customkey != '*')
+        	{
+            	master = master + customkey;           
+              	lcd.setCursor(x, 1);           
+             	lcd.print(customkey);                         
+             	x++;                             
+        	}
+        	customkey = myKeypad.waitForKey();
+    	}
+
+}
+
+int checkpassword()
+{
+  	if (edata.equals(master))
+  	{
+    		return 1;
+  	}
+  	else
+  	{
+    		return 0;
+  	}
+}
+
+int checksecurity()
+{
+  	if (esecurity.equals(security))
+  	{
+    		return 1;
+  	}
+  	else
+  	{
+    		return 0;
+  	}
+}
+
+int checkotp()
+{
+  	if (eotp.equals(otpstring))
+  	{
+    		return 1;
+  	}
+  	else
+  	{
+    		return 0;
+  	}
+}
+
+void allok()
+{
+    	digitalWrite(relay, HIGH);                  		//check if relay is positive or negetive triggered????????????
+     digitalWrite(green, HIGH);                  		//on led
+     lcd.clear();
+     lcd.setCursor(0, 0);
+     lcd.print("Door Unlocked");
+     lcd.setCursor(0, 1);
+     lcd.print("Welcome...");
+     delay(4000);
+     digitalWrite(relay, LOW);                   		//check if relay is positive or negetive triggered????????????
+     digitalWrite(green, LOW);                   		//off led
+}
+
+void sendotp()
+{
+    	lcd.clear();
+    	lcd.setCursor(0, 0);
+     lcd.print("Choose Person:");
+     lcd.setCursor(0, 1);
+     lcd.print("1-Sai,2-Kiran"); 
+    	customkey = myKeypad.waitForKey();
+    	while(customkey != '1' && customkey != '2')
+    	{
+      	customkey = myKeypad.waitForKey();
+    	}
+    	lcd.clear();
+    	lcd.setCursor(0, 0);
+    	lcd.print("OTP Sending...");
+    	x = random(1000,9999);
+  	otpstring = String(x);
+    	if(customkey == '1')
+     {
+        	gsm1();
+     }
+     else if(customkey == '2')
+     {
+         	gsm2();
+     }
+  	delay(2000);
+    	lcd.clear();
+    	lcd.setCursor(0, 0);
+    	lcd.print("OTP Sent");
+    	delay(750);
+    	lcd.clear();
+    	lcd.setCursor(0, 0);
+    	lcd.print("Enter OTP");
+  	return;
+}
+
+void gsm1()                                 			//send otp to mobile
+{
+    	mySerial.println("AT+CMGF=1");                      	//Sets the GSM Module in Text Mode
+    	delay(1000);          
+    	mySerial.println("AT+CMGS=\"+918106688767\"\r");     // mobile number
+    	delay(1000);
+    	mySerial.println("OTP - "+otpstring);                // The SMS text you want to send
+    	delay(100);
+    	mySerial.println((char)26);                       	// ASCII code of CTRL+Z
+    	delay(1000);
+
+  	Serial.println(otpstring);
+}
+
+void gsm2()                                 			
+{
+    	mySerial.println("AT+CMGF=1");                      	
+    	delay(1000);          
+    	mySerial.println("AT+CMGS=\"+918106896122\"\r");     
+    	delay(1000);
+    	mySerial.println("OTP - "+otpstring);                
+    	delay(100);
+    	mySerial.println((char)26);                       	
+    	delay(1000);
+
+	Serial.println(otpstring);
+}
+
+void gsmerror()                                 		
+{
+    	mySerial.println("AT+CMGF=1");                      	
+    	delay(1000);          
+    	mySerial.println("AT+CMGS=\"+918106688767\"\r");     
+    	delay(1000);
+    	mySerial.println("Wrong details entered.");         	
+    	delay(100);
+    	mySerial.println((char)26);                       	
+    	delay(1000);
+
+  	Serial.println(otpstring);
+}
